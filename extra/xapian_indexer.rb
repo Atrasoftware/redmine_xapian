@@ -1,3 +1,4 @@
+
 #!/usr/bin/ruby -W0
 # encoding: UTF-8
 
@@ -8,7 +9,7 @@
 ################################################################################################
 
 # Redmine installation directory
-$redmine_root = "/var/www/redmine"
+$redmine_root = "/home/bilel/Odesk_project/redmine-2.6.0"
 
 # scriptindex binary path 
 $scriptindex  = "/usr/bin/scriptindex"
@@ -17,18 +18,17 @@ $scriptindex  = "/usr/bin/scriptindex"
 $omindex      = "/usr/bin/omindex"
 
 # Directory containing xapian databases for omindex (Attachments indexing)
-$dbrootpath   = "/var/www/xapian-index"
+$dbrootpath   = "/home/bilel/Odesk_project/xapian_index"
 
 # Verbose output, values of 0 no verbose, greater than 0 verbose output
-$verbose      = 0
+$verbose      = 1
 
 # Define stemmed languages to index attachments Ej [ 'english', 'italian', 'spanish' ]
 # Repository database will be always indexed in english
 # Available languages are danish dutch english finnish french german german2 hungarian italian kraaij_pohlmann lovins norwegian porter portuguese romanian russian spanish swedish turkish:  
-$stem_langs	= ['english', 'spanish']
+$stem_langs	= ['english', 'french']
 
 #Project identifiers that will be indexed Ej [ 'prj_id1', 'prj_id2' ]
-$projects	= [ 'prj_id1', 'prj_id2' ]
 
 #File extensions that will not be indexed Ej [ '.txt', '.pdf']
 $excluded_extensions = []
@@ -247,7 +247,7 @@ def indexing_all(repository)
     Rails.logger.debug "DEBUG: walk entries size: " + entries.size.inspect
     return if entries.size < 1
     entries.each do |entry|
-      Rails.logger.debug "DEBUG: walking into: " + entry.lastrev.time.inspect
+      # Rails.logger.debug "DEBUG: walking into: " + entry.lastrev.time.inspect
       if entry.is_dir?
         walk(repository, identifier, repository.entries(entry.path, identifier))
       elsif entry.is_file?
@@ -573,6 +573,7 @@ if not $onlyfiles then
     end
   end
   $project=nil
+  $projects = Project.pluck(:identifier)
   $projects.each do |proj|
     begin
       scope = Project.active.has_module(:repository)
