@@ -1,104 +1,70 @@
+# encoding: utf-8
+#
+# Redmine Xapian is a Redmine plugin to allow attachments searches by content.
+#
+# Copyright (C) 2010  Xabier Elkano
+# Copyright (C) 2015  Karel Pičman <karel.picman@kontron.com>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 class Repofile < ActiveRecord::Base
  
-  has_no_table
-
-  #rescue_from Exception :with => :show_error
-
-  def show_error(exception)
-    Rails.logger.debug "DEBUG: exection " + exeption.inspect
-  end
-
-
-  def self.attr_accessor(*vars)
-    @attributes ||= []
-    @attributes.concat( vars )
-    super
-  end
-
-  def self.attributes
-    @attributes
-  end
-
-  #def initialize(attributes={})
-  #  attributes && attributes.each do |name, value|
-  #    send("#{name}=", value) if respond_to? name.to_sym 
-  #  end
-  #  Rails.logger.debug "?????"
-  #end
- 
-  def persisted?
-    false
-  end
-
-
-  after_create :set_variables
-  belongs_to :project
-  belongs_to :repository
-  
+  has_no_table 
+    
   column :description,    :string
   column :created_on,   :datetime
   column :project_id,   :integer
   column :filename, 	:string
   column :repository_id, :integer
-  validates_presence_of :created_on, :filename, :repository_id
+  column :url, :string
+  column :revision, :string
 
+  acts_as_searchable :columns => ["#{table_name}.filename", "#{table_name}.description"],
+    :permission => :browse_repository, :date_column => :created_on, :project_key => :project_id
 
-  acts_as_searchable :xapianfile => "repofile",
-                     :columns => ["#{table_name}.filename", "#{table_name}.description"],
-#                      #:include => {:board => :project},
-#                      # :project_key => 'project_id',
-#                      :date_column =>  Proc.new {|o| o.event_datetime },
-                       :permission => :browse_repository
-
-
-  #acts_as_event :title => :filename,
- #		:url => Proc.new {|o| {:controller => 'repositories', :action => 'changes', :id => o.project_id, 
-#			:repository_id => o.repository_id, :rev => nil, :path => o.filename} },
-#	        :type => Proc.new {|o| o.repo_type }
-   	#	:created_on =>  Proc.new {|o| o.file_timestamp }
   attr_accessor :description 
   attr_accessor :created_on
   attr_accessor :project_id
   attr_accessor :filename
-  attr_accessor :repository_id
+  attr_accessor :repository_id   
+  attr_accessor :url 
+  attr_accessor :revision   
 
-  def event_title
-    Rails.logger.debug "DEBUG: event title: " +  self[:filename].inspect
-    self[:filename]
+  def event_title    
+    self.filename
   end
 
-  def event_date
-    #Rails.logger.debug "DEBUG: date call"
-    #self[:created_on].to_date
-    Time.now.to_date
-  end 
-
-  def event_datetime
-    Rails.logger.debug "DEBUG: datetime call"
-    @created_on = self[:created_on]
-    self[:created_on]
+  def event_datetime    
+    self.created_on
   end
 
-  def event_url
-    {:controller => 'repositories', :action => 'entry', :id => self[:project_id], 
-	:repository_id => self[:repository_id], :rev => nil, :path => self[:filename]} 
+  def event_url   
+    #{ :controller => 'repositories',
+   #			:action => 'entry',
+   #			:id => self.project_id,
+   #			:repository_id => self.repository_id,			
+   #			:path => self.filename,
+   #
+   #			:only_path => true }
+   self.url
   end
 
   def event_description
-    self[:description]
+    self.description.force_encoding('UTF-8')
   end
-	
-  def set_variables
-    Rails.logger.debug "DEBUG: repofile after_initialize #{self.read_attribute(filename)}"
-    @filename = self.read_attribute(filename)
-    @project_id = self.read_attribute(project_id)
-    @descrtiption = self.read_attribute(description)
-    @repository_id = self.read_attribute(repository_id) 
-    @created_on = self.read_attribute(created_on)
-    Rails.logger.debug "DEBUG: repofile after_initialize EDN"
-  end
-
+	 
   def event_type
     self.repo_type
   end
@@ -106,13 +72,76 @@ class Repofile < ActiveRecord::Base
   def repo_type
     self.repository.type.split('::')[1].downcase
   end 
-
-  def file_timestamp
-    Rails.logger.debug "DEBUG: file_timestamp filename: #{self.read_attribute(filename)}"
-    repositoryfile = File.join(Rails.root, "files", "repos", project.name, self.repository.identifier, self.read_attribute(filename) )
-    Rails.logger.debug "DEBUG: file_timestamp #{repositoryfile}"
-    Rails.logger.debug "DEBUG: File mtime: #{File.new(repositoryfile).mtime}"
-    self.created_on=File.new(repositoryfile).mtime
+  
+  def project    
+    @project = Project.find_by_id self.project_id unless @project
+    @project
   end
+  
+  def repository
+    @repository = Repository.find_by_id self.repository_id unless @repository
+    @repository
+  end
+  
+  def identifier
+    self.revision.to_s
+  end  
+
+  def format_identifier
+      identifier
+  end
+
+  def self.search_result_ranks_and_ids(tokens, user = User.current, projects = nil, options = {})      
+    r = self.search(tokens, user, projects, options)        
+    r.map{ |x| [x[0].to_i, x[1]] }
+  end
+  
+  def self.search_results_from_ids(ids)    
+    results = []
+    ids.each do |id|
+      key = "Repofile-#{id}"
+      value = Redmine::Search.cache_store.fetch(key)
+      if value
+        attributes = eval(value)
+        repofile = Repofile.new        
+        repofile.id = id
+        repofile.filename = attributes[:filename]
+        repofile.created_on = attributes[:created_on].to_datetime
+        repofile.project_id = attributes[:project_id]
+        repofile.description = attributes[:description]
+        repofile.repository_id = attributes[:repository_id]
+        repofile.url = attributes[:url]
+        repofile.revision = attributes[:revision]
+        results << repofile
+        Redmine::Search.cache_store.delete(key)
+      end
+    end  
+    results
+  end
+  
+  private
+  
+  def self.search(tokens, user, projects, options)     
+    Rails.logger.debug 'Repository::search'
+    search_data = RedmineXapian::SearchStrategies::SearchData.new(
+      self,
+      tokens,
+      projects,
+      options,          
+      user,
+      name
+    )
+
+    search_results = []        
+   
+    if !options[:titles_only]
+      Rails.logger.debug "Call xapian search service for #{name.inspect}"          
+      xapian_results = RedmineXapian::SearchStrategies::XapianSearchService.search(search_data)
+      search_results.concat xapian_results unless xapian_results.blank?
+      Rails.logger.debug "Call xapian search service for  #{name.inspect} completed"          
+    end
+
+    search_results
+  end           
 
 end

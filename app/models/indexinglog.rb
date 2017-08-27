@@ -1,7 +1,9 @@
-#!/usr/bin/env ruby
-# -*- coding: utf-8 -*-
+# encoding: utf-8
 #
-# Redmine xapian plugin
+# Redmine Xapian is a Redmine plugin to allow attachments searches by content.
+#
+# Copyright (C) 2010  Xabier Elkano
+# Copyright (C) 2015  Karel Pičman <karel.picman@kontron.com>
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -23,8 +25,8 @@ class Indexinglog < ActiveRecord::Base
   belongs_to :repository
   belongs_to :changeset
 
-  validates_presence_of :repository_id
-  validates_presence_of :changeset_id
+  validates :repository_id, :presence => true
+  validates :changeset_id, :presence => true
 
   attr_protected :repository_id
   attr_protected :changeset_id

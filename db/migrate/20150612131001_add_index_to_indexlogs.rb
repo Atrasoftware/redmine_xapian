@@ -19,31 +19,12 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-require 'simplecov'
-require File.dirname(__FILE__) + '/../test_helper'
-
-class AttachmentTest < ActiveSupport::TestCase
-  fixtures :users, :projects, :issues, :issue_statuses, :documents, :attachments, 
-    :roles
-
-  def setup    
-    @admin = User.active.where(:admin => true).first
-    @projects_to_search = Project.active.all    
+class AddIndexToIndexlogs < ActiveRecord::Migration
+  def self.up    
+    add_index :indexinglogs, :repository_id
   end
 
-  
-  def test_attachment_search
-    Attachment.search_result_ranks_and_ids(
-      ['xyz'], 
-      @admin, 
-      @projects_to_search, 
-      { :all_words => true,        
-        :titles_only => '',    
-        :offset => nil,
-        :before => false,
-        :user_stem_lang => '',
-        :user_stem_strategy => ''})
-    assert true
+  def self.down    
+    remove_index :indexinglogs, :repository_id
   end
-      
 end

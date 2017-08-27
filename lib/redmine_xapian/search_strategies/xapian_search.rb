@@ -1,27 +1,49 @@
+# encoding: utf-8
+#
+# Redmine Xapian is a Redmine plugin to allow attachments searches by content.
+#
+# Copyright (C) 2010    Xabier Elkano
+# Copyright (C) 2015-16 Karel Pičman <karel.picman@kontron.com>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
 require 'uri'
 
 module RedmineXapian
   module SearchStrategies
     module XapianSearch
-      def xapian_search(tokens, limit_options, offset, projects_to_search, all_words, user_stem_lang, user_stem_strategy, xapian_file )
+      def xapian_search(tokens, limit_options, projects_to_search, all_words, user, xapian_file)
+        Rails.logger.debug 'XapianSearch::xapian_search'
         xpattachments = []
-        return [xpattachments,0] unless Setting.plugin_redmine_xapian['enable'] == "true"
-        Rails.logger.debug "DEBUG: global settings dump" + Setting.plugin_redmine_xapian.inspect
-        Rails.logger.debug "DEBUG: user_stem_lang: " + user_stem_lang.inspect
-        Rails.logger.debug "DEBUG: user_stem_strategy: " + user_stem_strategy.inspect
-        Rails.logger.debug "DEBUG: databasepath: " + get_database_path(user_stem_lang, xapian_file)
-        databasepath = get_database_path(user_stem_lang, xapian_file)
+        return nil unless Setting.plugin_redmine_xapian['enable'] == 'true'
+        Rails.logger.debug "Global settings dump #{Setting.plugin_redmine_xapian.inspect}"
+        stemming_lang = Setting.plugin_redmine_xapian['stemming_lang'].rstrip
+        Rails.logger.debug "stemming_lang: #{stemming_lang}"
+        stemming_strategy = Setting.plugin_redmine_xapian['stemming_strategy'].rstrip
+        Rails.logger.debug "stemming_strategy: #{stemming_strategy}"
+        databasepath = get_database_path(xapian_file)
+        Rails.logger.debug "databasepath: #{databasepath}"
 
         begin
           database = Xapian::Database.new(databasepath)
         rescue => error
-          #raise databasepath
-	  Rails.logger.error "ERROR: xapian database #{$databasepath} cannot be open #{error.inspect}"
- 	  return [xpattachments,0]
+          Rails.logger.error "Can't open Xapian database #{$databasepath} - #{error.inspect}"
+          return nil
         end
 
         # Start an enquire session.
-
         enquire = Xapian::Enquire.new(database)
 
         # Combine the rest of the command line arguments with spaces between
@@ -31,209 +53,181 @@ module RedmineXapian
         query_string = tokens.map{ |x| !(x[-1,1].eql?'*')? x+'*': x }.join(' ')
         # Parse the query string to produce a Xapian::Query object.
         qp = Xapian::QueryParser.new()
-        stemmer = Xapian::Stem.new(user_stem_lang)
+        stemmer = Xapian::Stem.new(stemming_lang)
         qp.stemmer = stemmer
         qp.database = database
-        case user_stem_strategy
-          when "STEM_NONE" then qp.stemming_strategy = Xapian::QueryParser::STEM_NONE
-          when "STEM_SOME" then qp.stemming_strategy = Xapian::QueryParser::STEM_SOME
-          when "STEM_ALL" then qp.stemming_strategy = Xapian::QueryParser::STEM_ALL
+        case stemming_strategy
+          when 'STEM_NONE'
+            qp.stemming_strategy = Xapian::QueryParser::STEM_NONE
+          when 'STEM_SOME'
+            qp.stemming_strategy = Xapian::QueryParser::STEM_SOME
+          when 'STEM_ALL'
+            qp.stemming_strategy = Xapian::QueryParser::STEM_ALL
         end
         if all_words
           qp.default_op = Xapian::Query::OP_AND
         else
           qp.default_op = Xapian::Query::OP_OR
         end
-	#Xapian::QueryParser::FLAG_WILDCARD
+
         query = qp.parse_query(query_string,Xapian::QueryParser::FLAG_WILDCARD)
-        Rails.logger.debug "DEBUG query_string is: #{query_string}"
-        Rails.logger.debug "DEBUG: Parsed query is: #{query.description()} "
+        Rails.logger.debug "query_string is: #{query_string}"
+        Rails.logger.debug "Parsed query is: #{query.description()}"
 
         # Find the top 100 results for the query.
         enquire.query = query
         matchset = enquire.mset(0, 1000)
 
-        return [xpattachments,0] if matchset.nil?
+        return nil if matchset.nil?
 
         # Display the results.
-        #logger.debug "#{@matchset.matches_estimated()} results found."
-        Rails.logger.debug "DEBUG: Matches 1-#{matchset.size}:\n"
+        Rails.logger.debug "Matches 1-#{matchset.size} records:"
+        Rails.logger.debug "Searching for #{(xapian_file == 'Repofile') ? 'repofiles' : 'attachments'}"
+        i = 0
 
         matchset.matches.each do |m|
-          #Rails.logger.debug "#{m.rank + 1}: #{m.percent}% docid=#{m.docid} [#{m.document.data}]\n"
-          Rails.logger.debug "DEBUG: m: " + m.document.data.inspect
-          docdata = m.document.data{url}
-          dochash = Hash[*docdata.scan(/(url|sample|modtime|type|size|date)=\/?([^\n\]]+)/).flatten]
-	  dochash["date"]=Time.at(0).in_time_zone  if dochash["date"].nil? # default timestamp
-	  dochash["url"]=URI.unescape(dochash["url"].to_s)
-          if dochash
-            Rails.logger.debug "DEBUG: dochash not nil.. " + dochash.fetch('url').to_s
-            Rails.logger.debug "DEBUG: limit_conditions " + limit_options[:limit].inspect
-            if dochash["url"].to_s =~ /^projects\// and xapian_file == "Repofile" then
-	      Rails.logger.debug "DEBUG: searching for repofiles" 
-              if repo_file = process_repo_file(projects_to_search, dochash)
+          if(xapian_file == 'Repofile')
+            if m.document.data =~ /^date=(.+)\W+sample=(.+)\W+url=(.+)\W/
+              dochash = { :date => $1, :sample => $2, :url => URI.unescape($3) }
+              if repo_file = process_repo_file(projects_to_search, dochash, user, i)
                 xpattachments << repo_file
+                i = i + 1
               end
-            elsif xapian_file == "Attachment"
-              Rails.logger.debug "DEBUG: searching for attachments"
-              if attachment = process_attachment(projects_to_search, dochash)
+            else
+              Rails.logger.error "Wrong format of document data: #{m.document.data}"
+            end
+          elsif xapian_file == 'Attachment'
+            if (m.document.data =~ /^url=(.+)\W+sample=(.+)\W+(author|type|caption|modtime|size)=/)
+              dochash = { :url => URI.unescape($1), :sample => $2 }
+              if attachment = process_attachment(projects_to_search, dochash, user)
                 xpattachments << attachment
               end
-            end
-          end
-        end
-        xpattachments = xpattachments.sort_by{|x| x[:created_on] }
-
-        if RUBY_VERSION >= "1.9"
-          xpattachments = xpattachments.each do |attachment|
-            attachment[:description].force_encoding('UTF-8')
-            attachment[:description]=validate_encoding(attachment[:description], :invalid => :replace, :replace => "*")
-          end
-        end
-        Rails.logger.debug "DEBUG: xapian searched"
-        [xpattachments, xpattachments.size]
-      end
-    private
-    
-      def validate_encoding(str, options = {})
-        str.chars.collect do |c|
-          if c.valid_encoding?
-             c
-          else
-            unless options[:invalid] == :replace
-            # it ought to be filled out with all the metadata
-            # this exception usually has, but what a pain!
-            # Why isn't ruby doing this for us?
-              raise  Encoding::InvalidByteSequenceError.new
             else
-              options[:replace] || (
-            # surely there's a better way to tell if
-            # an encoding is a 'Unicode encoding form'
-            # than this? What's wrong with you ruby 1.9?
-              str.encoding.name.start_with?('UTF') ?
-                "\uFFFD" :
-                "?" )
+              Rails.logger.error "Wrong format of document data: #{m.document.data}"
             end
           end
-        end.join
+        end
+        Rails.logger.debug 'Xapian searched'
+        xpattachments.map{ |a| [a.created_on, a.id] }
       end
 
-      def process_attachment(projects_to_search, dochash)
-        docattach = Attachment.where( :disk_filename => dochash.fetch('url').split('/').last).first
-        if docattach
-          Rails.logger.debug "DEBUG: attach event_datetime" + docattach.event_datetime.inspect
-          Rails.logger.debug "DEBUG: attach project" + docattach.project.inspect
-          Rails.logger.debug "DEBUG: docattach not nil..:  " + docattach.inspect
-          if docattach["container_type"] == "KbArticle" && !Redmine::Search.available_search_types.include?("kb_articles")
-            Rails.logger.debug "DEBUG: Knowledgebase plugin is not installed.."
-          elsif docattach.container
-            Rails.logger.debug "DEBUG: adding attach.. "
+    private
 
-            user = User.current
-            project = docattach.container.project
-            container_type = docattach["container_type"]
+      def process_attachment(projects, dochash, user)
+        attachment = Attachment.where(:disk_filename => dochash[:url].split('/').last).first
+        if attachment
+          Rails.logger.debug "Attachment created on #{attachment.created_on}"
+          Rails.logger.debug "Attachment's project #{attachment.project}"
+          Rails.logger.debug "Attachment's docattach not nil..:  #{attachment}"
+          if attachment.container
+            Rails.logger.debug 'Adding attachment'
+            project = attachment.container.project
+            container_type = attachment[:container_type]
             container_permission = SearchStrategies::ContainerTypeHelper.to_permission(container_type)
             can_view_container = user.allowed_to?(container_permission, project)
 
-            allowed = case container_type
-            when "KbArticle"
-              true
-            when "Issue"
-              can_view_issue = Issue.find_by_id(docattach[:container_id]).visible?
-              can_view_container && can_view_issue
+            if container_type == 'Issue'
+              issue = Issue.find_by_id(attachment[:container_id])
+              allowed = can_view_container && issue && issue.visible?
             else
-              can_view_container
+              allowed = can_view_container
             end
 
-            if allowed && project_included(docattach.container.project.id, projects_to_search)
-              docattach[:description] = dochash["sample"]
-              docattach
+            projects = [] << projects if projects.is_a?(Project)
+            project_ids = projects.collect(&:id) if projects
+
+            if allowed && (project_ids.blank? || (project_ids.include?(attachment.container.project.id)))
+              Redmine::Search.cache_store.write("Attachment-#{attachment.id}",
+                dochash[:sample].force_encoding('UTF-8')) if dochash[:sample]
+              return attachment
             else
-              Rails.logger.debug "DEBUG: user without permissions"
-              nil
+              Rails.logger.warn 'User without permissions'
             end
           end
         end
+        return nil
       end
 
-      def process_repo_file(projects_to_search, dochash)
-        Rails.logger.debug "DEBUG: repo file: " + dochash.fetch('url').inspect
-        Rails.logger.debug "DEBUG: repo date: " + dochash.fetch('date').inspect
-        arrt=dochash.fetch('url').split('/',6)
-	entrystr=dochash.fetch('url')[/[\w\_\-]+\/[\w\_\-]+\/[\w\-\_]+\/[\w\-\_]+\/(\w+)\//,1]
-        arrt.delete(entrystr)
-        arrt.delete('repository')
-        arrt.delete('projects')
- 	if arrt.last =~ /[\w\-\_]+\/entry\/(.*)/ then
-	  arrt[arrt.length-1]=$1
-	end
-        Rails.logger.debug "DEBUG: sample field: " + dochash.fetch('sample').inspect
-        dochash2=Hash[ [:project_identifier, :repo_identifier, :file ].zip(arrt) ]
-        project=Project.where(:identifier => dochash2[:project_identifier]).first
-        Rails.logger.debug "DEBUG: dochas2 content: " + dochash2.inspect
-        repository=Repository.where( :project_id=>project.id, :identifier=>dochash2[:repo_identifier] ).first unless project.nil?
-        Rails.logger.debug "DEBUG: repository found " + repository.inspect
-        if repository and not dochash.fetch('sample').blank?
-          allowed = User.current.allowed_to?(:browse_repository, repository.project)
-          if ( allowed and project_included( project.id, projects_to_search ) )
-            #fmtime=file_timestamp(dochash2[:file], project.identifier, repository.identifier)
-	          docattach=Repofile.new( :filename=>dochash2[:file],
-                                      :created_on=>Time.at(0).in_time_zone,
-                                      :project_id=>project.id,
-                                      :description=>dochash["sample"],
-                                      :repository_id=>repository.id)
-	          Rails.logger.debug "DEBUG: push attach" + docattach.inspect
-            docattach[:description]=dochash["sample"]
-	    docattach[:created_on]=dochash["date"]
-            docattach[:project_id]=project.id
-            docattach[:repository_id]=repository.id
-            docattach[:filename]=dochash2[:file]
-            #load 'acts_as_event.rb'
-            docattach[:project_id]=project.id
-            Rails.logger.debug "DEBUG: attach event_datetime" + docattach.event_datetime.inspect
-            Rails.logger.debug "DEBUG: push attach" + docattach.inspect
-            docattach
+      def process_repo_file(projects, dochash, user, id)
+        Rails.logger.debug "Repository file: #{dochash[:url]}"
+        Rails.logger.debug "Repository date: #{dochash[:date]}"
+        Rails.logger.debug "Repository sample field: #{dochash[:sample]}"
+        repository_attachment = nil
+        # if dochash[:url] =~ /^\/projects\/(.+)\/repository\/?(.*)\/entry\/(.*)$/
+          if dochash[:url] =~ /^\/projects\/(.+)\/repository\/(?:revisions\/(.*)\/|([a-zA-Z_0-9]*)\/)?(?:revisions\/(.*))?\/?entry\/(?:(?:branches|tags)\/(.+?)\/)?(.+?)(?:\?rev=(.*))?$/
+          repo_project_identifier = $1
+          Rails.logger.debug "Project identifier: #{repo_project_identifier}"
+          repo_identifier = $3
+          Rails.logger.debug "Repository identifier: #{repo_identifier}"
+          repo_filename = $6
+          Rails.logger.debug "Repository file: #{repo_filename}"
+          repo_revision = (!$2.nil? ? $2 : "") + (!$4.nil? ? $4 : "") + (!$5.nil? ? $5 : "") +(!$7.nil? ? $7 : "")
+          Rails.logger.debug "Repository revision: #{repo_revision}"
+          project = Project.where(:identifier => repo_project_identifier).first
+          if project
+            if repo_identifier != ""           
+              repository = Repository.where(:project_id => project.id, :identifier => repo_identifier).first if project
+            else
+              repository = Repository.where(:project_id => project.id).first if project
+            end            
+            if repository
+              Rails.logger.debug "Repository found #{repository.identifier}"
+              projects = [] << projects if projects.is_a?(Project)
+              project_ids = projects.collect(&:id) if projects
+              allowed = user.allowed_to?(:browse_repository, repository.project)
+
+              if allowed
+                if (project_ids.blank? || (project_ids.include?(project.id)))
+                  repository_attachment = Repofile.new
+                  repository_attachment.filename = repo_filename
+                  begin
+                    repository_attachment.created_on = dochash[:date].to_datetime
+                  rescue Exception => e
+                    Rails.logger.error e.message
+                    repository_attachment.created_on = Time.at(0)
+                  end
+                  repository_attachment.project_id = project.id
+                  if dochash[:sample]
+                    if dochash[:sample] != 'UTF-8'
+                      repository_attachment.description = dochash[:sample].encode('UTF-8', dochash[:sample].encoding,
+                       :invalid => :replace, :undef => :replace)
+                    else
+                      repository_attachment.description = dochash[:sample]
+                    end
+                  end
+                  repository_attachment.repository_id = repository.id
+                  repository_attachment.id = id
+                  repository_attachment.url = dochash[:url]
+                  repository_attachment.revision = repo_revision
+                  h = { :filename => repository_attachment.filename, :created_on => repository_attachment.created_on.to_s,
+                    :project_id => repository_attachment.project_id, :description => repository_attachment.description,
+                    :repository_id => repository_attachment.repository_id, :url => repository_attachment.url, :revision => repository_attachment.revision }
+                  Redmine::Search.cache_store.write("Repofile-#{repository_attachment.id}", h.to_s)
+                else
+                  Rails.logger.warn 'No projects to search in'
+                end
+              else
+                Rails.logger.warn 'User without :browse_repository permissions'
+              end
+            else
+              Rails.logger.error "Repository not found"
+            end
           else
-            Rails.logger.debug "DEBUG: user without :browse_repository permissions"
-            nil
+            Rails.logger.error "Project #{repo_project_identifier} not found"
           end
+        else
+          Rails.logger.error 'Wrong format of the URL'
         end
+        repository_attachment
       end
 
-      def project_included( project_id, projects_to_search )
-        Rails.logger.debug "DEBUG: project id: " + project_id.inspect
-        Rails.logger.debug "DEBUG: projects to search: " + projects_to_search.inspect
-        return true if projects_to_search.nil?
-        projects_to_search.any? do |x| 
-          if x.is_a?(ActiveRecord::Relation)
-            x.first.id == project_id        
-          else
-            x[:id] == project_id
-          end
+      def get_database_path(xapian_file)
+        if xapian_file == 'Repofile'
+          File.join(Setting.plugin_redmine_xapian['index_database'].rstrip, 'repodb')
+        else
+          File.join(Setting.plugin_redmine_xapian['index_database'].rstrip,
+            Setting.plugin_redmine_xapian['stemming_lang'].rstrip )
         end
-      end
-
-      def get_database_path(user_stem_lang, xapian_file)
-	path=nil
-	if xapian_file == "Repofile" then
-	  path=File.join(Setting.plugin_redmine_xapian['index_database'].rstrip, "repodb" )
- 	else
-          path=File.join(Setting.plugin_redmine_xapian['index_database'].rstrip, user_stem_lang )
-	end
-  	path
-      end
-
-      def file_timestamp( filename, project_name, repo_identifier )
-        repositoryfile = File.join(Rails.root, "files", "repos", project_name, repo_identifier, filename )
-        Rails.logger.debug "DEBUG: file_timestamp for #{repositoryfile}"
-        begin
-          time_stamp=File.new(repositoryfile).mtime.in_time_zone
-        rescue
-          Rails.logger.info "Redmine_xapian: Error getting #{repositoryfile} timestamp."
-          time_stamp=time_stamp=Time.at(0)
-        end
-        Rails.logger.debug "DEBUG: File mtime: #{time_stamp.inspect}"
-        time_stamp
       end
 
     end

@@ -1,9 +1,12 @@
+/* Repository Search Branch/ Rev */
+#search-results .identifier {
+    background-color: #9DCBFA;
+    color: #FFF;
+    border-radius: 3px;
+    padding: 2px 4px;
+    font-size: 11px;
+}
 
-div.repofiles { margin-top: 12px; }
-div.repofiles p { margin:4px 0 2px 0; }
-div.repofiles img { vertical-align: middle; }
-div.repofiles span.author { font-size: 0.9em; color: #888; }
-dt.subversion { background-image: url(../images/subversion.png); }
-.icon-repofile  { background-image: url(../images/repofile.png); }
-dt.git { background-image: url(../images/git.png); }
-
+dt.mercurial, dt.subversion, dt.git, dt.gitremote {
+	background-image: url('../images/repo.png');
+}

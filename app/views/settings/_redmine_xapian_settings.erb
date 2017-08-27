@@ -1,48 +1,74 @@
+<%
+# encoding: utf-8
+#
+# Redmine Xapian is a Redmine plugin to allow attachments searches by content.
+#
+# Copyright (C) 2010    Xabier Elkano
+# Copyright (C) 2015-16 Karel Pičman <karel.picman@kontron.com>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+%>
+
 <p>
-  <%=content_tag(:label, l(:label_enable_redmine_xapian))%>
-  <%=check_box_tag 'settings[enable]', true, @settings['enable'] == "true" %>
+  <%= content_tag(:label, l(:label_enable_redmine_xapian)) %>
+  <%= check_box_tag 'settings[enable]', true, @settings['enable'] == 'true' %>
 </p>
 
 <p>
-  <%=content_tag(:label, l(:label_index_database)) %>
-  <%=text_field_tag 'settings[index_database]', @settings['index_database'] %><br/>
-  (<%=l(:label_default)%>: /var/tmp)
-</p>
-<% @stem_langs = ["danish", "dutch", "english", "finnish", "french", "german",
-                "hungarian", "italian", "norwegian", "portuguese", "romanian",
-                "russian", "spanish", "swedish", "turkish"] %>
-
-
-<p>
-<%= content_tag(:label, l(:label_enable_xapian_on_search))%> <%=radio_button_tag 'settings[stem_on_search]', 'true', @settings['stem_on_search'] == 'true', :checked=>true  %> yes <%=radio_button_tag 'settings[stem_on_search]', 'false', @settings['stem_on_search'] == 'false'  %> No
+  <%= content_tag(:label, l(:label_index_database)) %>
+  <%= text_field_tag 'settings[index_database]', @settings['index_database'] %>
+  <em class="info">
+    <%= l(:label_default) %>: /var/tmp/omindex
+  </em>
 </p>
 
+<% stem_langs = %w(danish dutch english finnish french german german2 hungarian italian kraaij_pohlmann lovins norwegian porter portuguese romanian russian spanish swedish turkish) %>
 
-<p>
- <%=content_tag(:label, l(:label_default_stemming_lang)) %>
-  <%=select_tag( "settings[stemming_lang]", 
-		options_for_select( @stem_langs, @settings['stemming_lang'] ))%><br/>
-  (<%=l(:label_default)%>: english )
-<p>
-<%=content_tag(:label, l(:label_search_languages)) %>
-
-
-<%= select_tag("settings[stem_langs]", 
-                   options_for_select( @stem_langs,  (@settings['stem_langs'].nil? ) ?  @settings['stemming_lang'] : @settings['stem_langs']),
-                   :multiple => true) %>
+<p>  
+  <%= content_tag(:label, l(:label_default_stemming_lang)) %>
+  <%= select_tag('settings[stemming_lang]', options_for_select(stem_langs, @settings['stemming_lang']))%>
+  <em class="info">
+    <%= l(:text_stemming, :languages => stem_langs.join(', ')) %> <%= "#{l(:label_default)}: #{stem_langs[2]}" %>
+  </em>
 </p>
+    
 <p>
-<%=content_tag(:label, l(:label_default_stemming_strategy))%>
-This controls how the query parser will apply the stemming algorithm. The default value is STEM_NONE. The possible values are:
-<br>
-    * STEM_NONE: Don't perform any stemming.<br>
-    * STEM_SOME: Search for stemmed forms of terms except for those which start with a capital letter, or are followed by certain characters (currently: (/@\<\>=*[{\" ), or are used with operators which need positional information. Stemmed terms are prefixed with 'Z'.<br>
-    * STEM_ALL: Search for stemmed forms of all words (note: no 'Z' prefix is added).<br>
-
-Note that the stemming algorithm is only applied to words in probabilistic fields - boolean filter terms are never stemmed.<br>
-<br>
-  <%=radio_button_tag 'settings[stemming_strategy]', 'STEM_NONE', @settings['stemming_strategy'] == 'STEM_NONE', :checked=>true  %> <%=l(:label_stem_none)%> (<%=l(:label_default)%>)<br>
-  <%=radio_button_tag 'settings[stemming_strategy]', 'STEM_SOME', @settings['stemming_strategy'] == 'STEM_SOME'  %> <%=l(:label_stem_some)%><br>
-  <%=radio_button_tag 'settings[stemming_strategy]', 'STEM_ALL', @settings['stemming_strategy'] == 'STEM_ALL'  %> <%=l(:label_stem_all)%> <br>
+  <%= content_tag(:label, l(:label_search_languages)) %>
+  <%= select_tag('settings[stem_langs]', 
+      options_for_select( stem_langs,  (@settings['stem_langs'].nil? ) ?  @settings['stemming_lang'] : @settings['stem_langs']),
+        :multiple => true) %>
 </p>
 
+<p>
+  <%= content_tag(:label, l(:label_default_stemming_strategy))%>
+  <%= radio_button_tag 'settings[stemming_strategy]', 'STEM_NONE', @settings['stemming_strategy'] == 'STEM_NONE', :checked => true %> <%= l(:label_stem_none) %> (<%= l(:label_default) %>)<br/>
+  <%= radio_button_tag 'settings[stemming_strategy]', 'STEM_SOME', @settings['stemming_strategy'] == 'STEM_SOME' %> <%= l(:label_stem_some) %><br/>
+  <%= radio_button_tag 'settings[stemming_strategy]', 'STEM_ALL', @settings['stemming_strategy'] == 'STEM_ALL' %> <%= l(:label_stem_all) %><br/>
+  <em class="info">
+    <%= l(:text_stemming_info) %><br/>
+    &nbsp;&nbsp;<%= l(:text_stemming_none) %><br/>
+    &nbsp;&nbsp;<%= l(:text_stemming_some) %><br/>
+    &nbsp;&nbsp;<%= l(:text_stemming_all) %><br/>
+  <%= l(:text_stemming_note) %>
+  </em>
+</p>
+
+<p>
+  <%= content_tag(:label, l(:label_save_search_scope)) %>
+  <%= check_box_tag 'settings[save_search_scope]', true, @settings['save_search_scope'] == 'true' %>
+  <em class="info">
+    <%= l(:text_save_search_scope) %>
+  </em>
+</p>
